@@ -5,8 +5,7 @@ from time import sleep
 from threading import Thread
 from pygame import mixer
 
-from models.cli_tabuleiro import CliTabuleiroSocket
-from models.cli_chat import CliChatSocket
+from models.resta_um import IJogoRestaUm
 
 class GuiRestaUm:
   ''' # RestaUmInterface
@@ -14,7 +13,7 @@ class GuiRestaUm:
   Classe que inicializa uma interface grafica, com `TKinter`, para o jogo Resta Um.
 
   ## Parâmetros:
-    cli_tabuleiro : CliTabuleiroSocket
+    cli_tabuleiro : IJogoRestaUm
         O cliente socket ja inicializado que será utilizado para a conexão multiplayer
     '''
   jogada = ""
@@ -31,18 +30,18 @@ class GuiRestaUm:
   fim_jogo = None
   dictImgs = {}
 
-  def __init__(self, cli_tabuleiro: CliTabuleiroSocket, cli_chat: CliChatSocket):
+  def __init__(self, cli: IJogoRestaUm, cliente_id: str):
     '''
     Inicializa a interface grafica do jogo
 
     ## Parâmetros:
-    cli_tabuleiro : CliTabuleiroSocket
+    cli_tabuleiro : IJogoRestaUm
         O cliente socket ja inicializado que será utilizado para a conexão multiplayer
     '''
-    self.cliTab: CliTabuleiroSocket = cli_tabuleiro
-    self.cliChat: CliChatSocket = cli_chat
+    self.meuID: str = cliente_id
+    self.cliRMI: IJogoRestaUm = cli
     self.desistiu = False
-    self.cliTab.jogo.reiniciaTabuleiro()
+    self.cliRMI.reiniciaTabuleiro()
     self.criaComponenteJanela()
     mixer.init()
 
@@ -98,7 +97,8 @@ class GuiRestaUm:
     x: int,
     y: int,
     tag: int,
-    ct: CliTabuleiroSocket
+    clente_id: str,
+    cRMI: IJogoRestaUm
   ) -> tuple[bool, int, bool]:
     ''' # selecionaPeca
 
@@ -117,8 +117,8 @@ class GuiRestaUm:
     tag : int
         identificador do componente da peça
 
-    ct : CliTabuleiroSocket
-        cli do socket de Jogo
+    ct : IJogoRestaUm
+        cli do RMI de Jogo
 
     ## Retorno:
     r : tuple[reposicionar: bool , rmDst: int , movErrado: bool]
@@ -143,7 +143,7 @@ class GuiRestaUm:
       return False, removerDestaque, False
 
     GuiRestaUm.jogada = f"{GuiRestaUm.jogada} {pecaSelecionada}"
-    minhaVez = not ct.enviarLance(GuiRestaUm.jogada)
+    minhaVez = not cRMI.enviarLance(GuiRestaUm.jogada, clente_id)
 
     if minhaVez:
       GuiRestaUm.pecaDestacada = tag
@@ -206,15 +206,17 @@ class GuiRestaUm:
     Função de criação de componentes: cria e posiciona as peças no tabuleiro
     '''
     self.tagPecas = []
+    posicoesTabuleiro = self.cliRMI.tabuleiro
+
     for i in range(1, 8):
       linha = []
       for j in range(1, 8):
         lin = 90 + ((i-1) * 40) + ((i-1) * 5)
         col = 35 + ((j-1) * 50) + ((j-1) * 10)
         tagItem = -1
-        if self.cliTab.jogo.tabuleiro[i][j] == '*':
+        if posicoesTabuleiro[i][j] == '*':
           tagItem = self.canvas.create_image(col, lin, anchor=NW, image=GuiRestaUm.img_peca)
-        if self.cliTab.jogo.tabuleiro[i][j] == 'O':
+        if posicoesTabuleiro[i][j] == 'O':
           tagItem = self.canvas.create_image(col, lin, anchor=NW, image=GuiRestaUm.img_vazio)
         self.canvas.tag_bind(
           tagItem,
@@ -314,14 +316,14 @@ class GuiRestaUm:
     tag : int
         identificador do componente da peça
 
-    ct : CliTabuleiroSocket
+    ct : IJogoRestaUm
         cli do socket de Jogo
 
     '''
-    if self.cliTab.jogo.turno == GuiRestaUm.meuTurno and GuiRestaUm.prontoPJogar:
+    if self.cliRMI.turno == GuiRestaUm.meuTurno and GuiRestaUm.prontoPJogar:
       pecaID = self.canvas.itemcget(tag, 'image')[-1]
       if pecaID != GuiRestaUm.dictImgs['vazio']:
-        reposicionar, rmDst, movErrado = GuiRestaUm.selecionaPeca(x, y, tag, self.cliTab)
+        reposicionar, rmDst, movErrado = GuiRestaUm.selecionaPeca(x, y, tag, self.meuID, self.cliRMI)
         if GuiRestaUm.pecaDestacada != -1:
           self.canvas.itemconfigure(tag, image=GuiRestaUm.img_peca_high)
         if rmDst != -1:
@@ -341,15 +343,15 @@ class GuiRestaUm:
     '''
     while True:
       try:
-        recebeu, advDesistiu = self.cliTab.receberLance()
-
+        sleep(0.5)
+        recebeu, fim, desi = self.cliRMI.receberLance(self.meuID)
         if recebeu:
           GuiRestaUm.reproduzSom('movimento')
           self.reposicionaPecas()
-        elif advDesistiu:
-          self.checaFimDeJogo(desistencia=True)
+        elif fim:
+          if desi and not self.desistiu:
+            self.checaFimDeJogo()
           break
-        else: break
       except:
         print("[Movimento]: nenhuma resposta obtida")
 
@@ -364,23 +366,19 @@ class GuiRestaUm:
     '''
     while True:
       try:
-        turnoAdv = self.cliTab.receberTurno()
         while GuiRestaUm.meuTurno == -1:
           sleep(0.5)
+        while not self.cliRMI.turnosDefinidos():
+          sleep(0.5)
 
-        GuiRestaUm.turnoVar.set("")
-        if turnoAdv != GuiRestaUm.meuTurno:
-          GuiRestaUm.prontoPJogar = True
-          if GuiRestaUm.meuTurno == 0:
-            GuiRestaUm.turnoVar.set("Você inicia a partida")
-          elif GuiRestaUm.meuTurno == 1:
-            GuiRestaUm.turnoVar.set("Seu adversario iniciará a partida")
-          thread_jogo = Thread(target=self.recebeJogadaAdversario, daemon=True)
-          thread_jogo.start()
-          break
-        else:
-          GuiRestaUm.meuTurno = -1
-          self.criaComponenteTurnos(texto="Conflito, tentem novamente")
+        GuiRestaUm.prontoPJogar = True
+        if GuiRestaUm.meuTurno == 0:
+          GuiRestaUm.turnoVar.set("Você inicia a partida")
+        elif GuiRestaUm.meuTurno == 1:
+          GuiRestaUm.turnoVar.set("Seu adversario iniciará a partida")
+        thread_jogo = Thread(target=self.recebeJogadaAdversario, daemon=True)
+        thread_jogo.start()
+        break
       except:
         print("[Turno]: nenhuma resposta obtida")
 
@@ -396,41 +394,45 @@ class GuiRestaUm:
         0 se o usuario local quiser iniciar a partida, ou 1 caso contrário
     '''
     GuiRestaUm.meuTurno = t
-    self.cliTab.definirTurno(f"{t}")
-    GuiRestaUm.botaoT1.destroy()
-    GuiRestaUm.botaoT2.destroy()
-    GuiRestaUm.labelDecTurno.destroy()
+    if (self.cliRMI.definirTurno(self.meuID, t)):
+      GuiRestaUm.botaoT1.destroy()
+      GuiRestaUm.botaoT2.destroy()
+      GuiRestaUm.labelDecTurno.destroy()
 
-    GuiRestaUm.turnoVar.set("Aguardando resposta do seu adversário")
-    GuiRestaUm.labelInfoTurno = Label(self.janela, textvariable=GuiRestaUm.turnoVar, font=GuiRestaUm.fonteText)
-    GuiRestaUm.labelInfoTurno.place(x=520, y=15)
-    GuiRestaUm.botaoDesistencia = Button(self.janela, text="Desisitir", command=lambda _: self._desistir(), style="Estilizado.TButton")
-    GuiRestaUm.botaoDesistencia.place(x=520, y=45)
+      GuiRestaUm.turnoVar.set("Aguardando resposta do seu adversário")
+      GuiRestaUm.labelInfoTurno = Label(self.janela, textvariable=GuiRestaUm.turnoVar, font=GuiRestaUm.fonteText)
+      GuiRestaUm.labelInfoTurno.place(x=520, y=15)
+      GuiRestaUm.botaoDesistencia = Button(self.janela, text="Desistir", command=self._desistir, style="Estilizado.TButton", width=11)
+      GuiRestaUm.botaoDesistencia.place(x=520, y=45)
+    else:
+      GuiRestaUm.meuTurno = -1
+      GuiRestaUm.labelDecTurno.config(text=f"Seu adversário decidiu por este turno")
 
   def _desistir(self):
     self.desistiu = True
-    self.checaFimDeJogo(desistencia=True)
-    self.cliTab.enviarLance("resign")
+    self.cliRMI.desistencia(self.meuID)
+    self.checaFimDeJogo()
 
   def reposicionaPecas(self):
     ''' # reposicionaPecas
 
     Função para realizar a re-renderização da posição das peças no tabuleiro
     '''
+    posicoesTabuleiro = self.cliRMI.tabuleiro
     for i in range(1, 8):
       for j in range(1, 8):
-        if self.cliTab.jogo.tabuleiro[i][j] == '*':
+        if posicoesTabuleiro[i][j] == '*':
           self.canvas.itemconfigure(self.tagPecas[i-1][j-1], image=GuiRestaUm.img_peca)
-        if self.cliTab.jogo.tabuleiro[i][j] == 'O':
+        if posicoesTabuleiro[i][j] == 'O':
           self.canvas.itemconfigure(self.tagPecas[i-1][j-1], image=GuiRestaUm.img_vazio)
-    if GuiRestaUm.meuTurno == self.cliTab.jogo.turno:
+    if GuiRestaUm.meuTurno == self.cliRMI.turno:
       GuiRestaUm.turnoVar.set("Sua vez")
     else:
       GuiRestaUm.turnoVar.set("Vez do adversário")
 
     self.checaFimDeJogo()
 
-  def checaFimDeJogo(self, desistencia=False):
+  def checaFimDeJogo(self):
     ''' # checaFimDeJogo
 
     Função que verifica se o jogo finalizou, se restou apenas uma peça, e se o usuário
@@ -439,34 +441,27 @@ class GuiRestaUm:
     Em caso de termino da partida, mostra o resultado em tela, inicia a animação de
     fim de jogo e adiciona a opção de jogar novamente
     '''
-    terminou, contPecas = self.cliTab.jogo.estaNoFim()
-    if terminou or desistencia:
+    terminou, contPecas = self.cliRMI.estaNoFim()
+
+    if terminou:
       GuiRestaUm.turnoVar.set("")
+      GuiRestaUm.botaoDesistencia.destroy()
       self.reproduzFimDeJogo()
       GuiRestaUm.prontoPJogar = False
-      if not desistencia:
-        self.cliTab.enviarLance("fim")
+      vencedor = self.cliRMI.vencedor == self.meuID
 
-      vencedor = False
-      if desistencia:
-        if not self.desistiu: vencedor = True
-      elif contPecas > 1:
-        vencedor = self.cliTab.jogo.turno == GuiRestaUm.meuTurno
-      else:
-        vencedor = self.cliTab.jogo.turno != GuiRestaUm.meuTurno
       fonteResultado = Font(size=18, weight="bold")
-
       if vencedor:
-        if desistencia:
-          GuiRestaUm.labelInfoResultado = Label(self.janela,text="Parabéns, você venceu!\n    Seu adversario desistiu!",font=fonteResultado)
+        if contPecas == -1:
+          GuiRestaUm.labelInfoResultado = Label(self.janela,text="Parabéns, você venceu!\nSeu adversario desistiu!",font=fonteResultado)
         elif contPecas == 1:
           GuiRestaUm.labelInfoResultado = Label(self.janela,text="Parabéns, você venceu!\n         Restou Um!",font=fonteResultado)
         else:
           GuiRestaUm.labelInfoResultado = Label(self.janela,text=f"Fim de movimentos\n     Você venceu!\n      Restaram {contPecas}",font=fonteResultado)
         self.reproduzSom("vitoria")
       else:
-        if desistencia:
-          GuiRestaUm.labelInfoResultado = Label(self.janela,text="Você perdeu :(",font=fonteResultado)
+        if contPecas == -1:
+          GuiRestaUm.labelInfoResultado = Label(self.janela,text="Você desistiu :(",font=fonteResultado)
         elif contPecas == 1:
           GuiRestaUm.labelInfoResultado = Label(self.janela,text="Você perdeu :(\n   Restou Um  ",font=fonteResultado)
         else:
@@ -495,7 +490,7 @@ class GuiRestaUm:
 
     GuiRestaUm.meuTurno = -1
 
-    self.cliTab.jogo.reiniciaTabuleiro()
+    self.cliRMI.reiniciaTabuleiro()
     self.reposicionaPecas()
     GuiRestaUm.turnoVar.set("")
     GuiRestaUm.labelInfoResultado.destroy()
@@ -505,8 +500,8 @@ class GuiRestaUm:
 
     self.criaComponenteTurnos()
   
-  def addMensagem(self,identificador: str, msg: str):
-    ''' # addMensagem
+  def atualizarMensagens(self, mensgs: list[str]):
+    ''' # atualizarMensagens
 
     Função que recebe uma nova mensagem registrada e a renderiza no componente
     da conversa do chat
@@ -518,13 +513,16 @@ class GuiRestaUm:
     msg : str
         O texto da mensagem a ser exibida
     '''
-    self.mensagens.append(f"{identificador}: {msg}")
-    qtdMsg = len(self.mensagens) # 4
+    self.mensagens = mensgs
+    qtdMsg = len(self.mensagens)
     lm = list(reversed(self.mensagens))
     mensagens: list[str] = []
     for i in range(11, -1, -1):
       if qtdMsg > i:
-        mensagens.append(lm[i])
+        mensg = lm[i].replace(self.meuID, "Você")
+        mensg = mensg.replace("0__", "")
+        mensg = mensg.replace("1__", "")
+        mensagens.append(mensg)
       else :
         mensagens.append("")
     GuiRestaUm.variavelMensagens.set(mensagens)
@@ -544,8 +542,10 @@ class GuiRestaUm:
     '''
     while True:
       try:
-        msg = self.cliChat.receber_mensagem()
-        self.addMensagem("Adversário", msg)
+        msgs = self.cliRMI.receberMensagens(self.meuID)
+        if msgs != None:
+          self.atualizarMensagens(msgs)
+        sleep(0.25)
       except:
         print("[Rec. msg]: nenhuma resposta obtida")
 
@@ -557,9 +557,10 @@ class GuiRestaUm:
     try:
       msg = self.minhaMensagem.get()
       if len(msg) > 0:
-        self.addMensagem("Você", msg)
         self.minhaMensagem.set("")
-        self.cliChat.enviar_mensagem(msg)
+        self.cliRMI.enviarMensagem(self.meuID, msg)
+        self.mensagens.append(f"{self.meuID}: {msg}")
+        self.atualizarMensagens(self.mensagens)
     except:
       print("[Env. Msg.]: nenhuma resposta obtida")
 
