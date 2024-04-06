@@ -1,5 +1,5 @@
 import Pyro4
-from resta_um import IJogoRestaUm
+from models.resta_um import IJogoRestaUm
 
 class ServidorRestaUm(IJogoRestaUm):
   def __init__(self):
@@ -302,13 +302,3 @@ class ServidorRestaUm(IJogoRestaUm):
     self.fazMovimento(mover, retirar, destino)
     self._lanceFeito = (True, cliente_id)
     return True
-
-daemon = Pyro4.Daemon()
-ns = Pyro4.locateNS()
-servRestaUm = ServidorRestaUm()
-
-uri = daemon.register(servRestaUm)
-ns.register("resta_um.servidor", uri)
-
-print("Servidor do Jogo pronto.")
-daemon.requestLoop()
