@@ -1,4 +1,5 @@
 import Pyro4
-uri = "PYRONAME:resta_um.servidor"
+from models.resta_um import IJogoRestaUm
 
-cliente = Pyro4.Proxy(uri)
+uri = "PYRONAME:resta_um.servidor"
+cliente: IJogoRestaUm = Pyro4.Proxy(uri)
