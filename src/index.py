@@ -1,6 +1,6 @@
 from models.cliente import cliente
-from gui_resta_um import GuiRestaUm
-from gui_define_nome import GuiDefineNome
+from gui.gui_resta_um import GuiRestaUm
+from gui.gui_define_nome import GuiDefineNome
 
 class Jogador:
   def __init__(self):
